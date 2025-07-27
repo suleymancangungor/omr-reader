@@ -6,7 +6,6 @@ import os
 import math
 
 
-
 def perspective_transform(image, crop_ratio=0.1, min_r = 15, max_r=25, circ_thr=0.7):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape[:2]
@@ -15,12 +14,6 @@ def perspective_transform(image, crop_ratio=0.1, min_r = 15, max_r=25, circ_thr=
     thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
                                    cv2.THRESH_BINARY_INV, 21, 5)
     cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # contour_vis = np.zeros_like(gray)
-    # cv2.drawContours(contour_vis, cnts, -1, (255, 255, 255), 1)
-    # cv2.imshow("Contours", contour_vis)
-    # cv2.waitKey(0)
-    # exit()
 
     bubbles = []
     for c in cnts:
@@ -40,14 +33,7 @@ def perspective_transform(image, crop_ratio=0.1, min_r = 15, max_r=25, circ_thr=
         mask = np.zeros(gray.shape, dtype=np.uint8)
         cv2.circle(mask, (x, y), r, 255, -1)
         roi_vals = gray[mask == 255]
-        # fill_ratio = 1 - (np.mean(roi_vals) / 255.0)
         bubbles.append((x, y+int(h*crop_ratio), r))
-
-    # print(f"Found {len(bubbles)} bubbles in the image.")
-
-    # if bubbles is not None:
-    #     for (x, y, r,) in bubbles:
-    #         cv2.circle(image, (x, y), r, (0, 255, 0), 2)
 
     if len(bubbles) == 0:
         print("No circles found. Exiting.")
@@ -64,14 +50,7 @@ def perspective_transform(image, crop_ratio=0.1, min_r = 15, max_r=25, circ_thr=
     # br = coords[np.argmax(sum_xy)]
     corner_pts = [tl,tr,br,bl]
 
-    # cv2.circle(image, tuple(tl), 10, (0, 0, 255), -1)
-    # cv2.circle(image, tuple(tr), 10, (0, 255, 0), -1)
-    # cv2.circle(image, tuple(br), 10, (255, 0, 0), -1)
-    # cv2.circle(image, tuple(bl), 10, (0, 255, 255), -1)
-
     pts_src = np.array([tl,tr,br,bl], dtype='float32')
-    # width = max(np.linalg.norm(tr-tl), np.linalg.norm(br-bl))
-    # height = max(np.linalg.norm(bl-tl), np.linalg.norm(br-tr))
     width = int((np.linalg.norm(tr-tl) + np.linalg.norm(br-bl)) / 2)
     height = int((np.linalg.norm(bl-tl) + np.linalg.norm(br-tr)) / 2)
     pts_dst = np.array([[0,0],[width-1,0],[width-1,height-1],[0,height-1]], dtype='float32')
@@ -90,30 +69,32 @@ def perspective_transform(image, crop_ratio=0.1, min_r = 15, max_r=25, circ_thr=
     M_offset = offset @ M
     M_offset = M_offset[:3]
     
-    # warped = cv2.warpPerspective(image, M_offset, (new_w, new_h))
     warped = cv2.warpPerspective(image, M_offset, (new_w, new_h), 
                             flags=cv2.INTER_LANCZOS4, 
                             borderMode=cv2.BORDER_CONSTANT,
                             borderValue=(255,255,255))
+                            
     return warped, corner_pts 
+
+
+def remove_pure_black_areas(image, black_threshold):
+    cleaned_image = image.copy()
+    black_mask = image <= black_threshold
+    cleaned_image[black_mask] = 255
+    return cleaned_image
 
 
 def find_alignment_bar_y_coords(gray, bound):
     alignment_bar = gray[:, 0:bound]
+    alignment_bar = remove_pure_black_areas(alignment_bar, black_threshold=10)
     blur = cv2.GaussianBlur(alignment_bar, (5,5), 0)
     _, thresh = cv2.threshold(blur, 0, 255,
                                 cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=1)
     cnts = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = imutils.grab_contours(cnts)
-
-    # # Debug
-    # contour_vis = cv2.cvtColor(alignment_bar, cv2.COLOR_GRAY2BGR)
-    # cv2.drawContours(contour_vis, cnts, -1, (0,0,255), 1)  # tüm contourler kırmızı
-    # contour_vis = resize_image(contour_vis)
-    # cv2.imshow("All Contours", contour_vis)
-    # cv2.waitKey(0)
 
     alignment_boxes = []
     H, W = gray.shape[:2]
@@ -124,25 +105,21 @@ def find_alignment_bar_y_coords(gray, bound):
         extent = area / float(rect_area + 1e-5)
         aspect_ratio = w/float(h)
 
+        if area > H * W * 0.001:
+            continue
+
         if 1.5 < aspect_ratio < 10:
             if 0.7 < extent < 1.0:
                 if H*0.002 < h < H*0.02:
                     alignment_boxes.append((x,y,w,h))
                     cv2.rectangle(alignment_bar, (x,y), (x+w, y+h), (0, 255, 0), 2)
 
-    # # Debug
-    # for (x,y,w,h) in alignment_boxes:
-    #     cx = x + w // 2
-    #     cy = y + h // 2
-    #     cv2.line(alignment_bar, (0, cy), (bound, cy), (0, 0, 255), 1)
-    # cv2.imshow("Alignment Bar", alignment_bar)
-    # cv2.waitKey(0)
-    # exit()
-
     y_coords = sorted([y + h//2 for (_,y,_,h) in alignment_boxes])
     y_coords = group_bubbles(y_coords, threshold=int(H*0.005))
 
-    # print(f"Alignment bar y coords: {y_coords}")
+    if not y_coords:
+        print("Alignment bar couldn't found.")
+
     return y_coords
 
 
@@ -191,86 +168,69 @@ def circular_roi(gray, x, y, r, return_vals=False):
     return circ
 
 
-def find_bubbles_on_row(image, y_center, row_height=40, min_r=15, max_r=30, fill_thr=0.4):
+def find_bubbles_on_row(image, y_center, x_bound=0, row_height=40, min_r=17, max_r=30, black_thr=0.5):
     bubbles = []
     h, w = image.shape[:2]
     y1 = max(y_center - row_height//2, 0)
     y2 = min(y_center + row_height//2, h)
     
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    row_crop = image[y1:y2, :]   
+    row_crop = image[y1:y2, x_bound:]   
     gray_crop = cv2.cvtColor(row_crop, cv2.COLOR_BGR2GRAY)
 
-
     gray_blur = cv2.GaussianBlur(gray_crop, (3,3), 0)
-    _, thresh_otsu = cv2.threshold(gray_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    # _, thresh_otsu = cv2.threshold(gray_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     _, thresh_fixed = cv2.threshold(gray_blur, bubble_threshold, 255, cv2.THRESH_BINARY_INV)
     
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
-    closed = cv2.morphologyEx(thresh_otsu, cv2.MORPH_CLOSE, kernel)
-    eroded = cv2.erode(closed, kernel, iterations=1)
-    cnts, _ = cv2.findContours(eroded, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    closed = cv2.morphologyEx(thresh_fixed, cv2.MORPH_CLOSE, kernel)
+    cnts, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # # Debug
-    # debug_img = cv2.cvtColor(gray_crop, cv2.COLOR_GRAY2BGR)
-    # for c in cnts:
-    #     (x,y),r = cv2.minEnclosingCircle(c)
-    #     cv2.circle(debug_img, (int(x),int(y)), int(r), (0,255,0), 1)
-    # cv2.imshow("All contours Q17", debug_img)
-    # cv2.waitKey(0)
-    
+    debug_crop = row_crop.copy()
+
     for c in cnts:
         (x,y), r = cv2.minEnclosingCircle(c)
+        circle_area = np.pi * (r**2)
         area = cv2.contourArea(c)
-        perimeter = cv2.arcLength(c, True)
-        if perimeter == 0:
-            continue
-        circularity = 4*math.pi*area/(perimeter*perimeter + 1e-5)
+        circularity = area / circle_area 
 
-        if 0.7 < circularity < 1.2 and min_r < r < max_r:
-            mask = np.zeros_like(closed, dtype=np.uint8)
-            # cv2.circle(mask, (int(x), int(y)), int(r), 255, -1)
-            roi, roi_vals = circular_roi(gray, int(x), int(y)+y1, int(r), return_vals=True)
-
-            # cv2.imshow("ROI", roi)
-            # cv2.waitKey(0)
-
-            fill_ratio = 1 - (np.mean(roi_vals) / 255.0)
-            print("Circularity: ", circularity, " Fill Ratio: ", fill_ratio)
-            print(f"Circle at ({int(x)}, {int(y)+y1}) with radius {int(r)} and fill ratio {fill_ratio:.2f}")
-
-            if fill_ratio > fill_thr:
-                bubbles.append((int(x), int(y)+y1, int(r)))
-                # cv2.circle(image, (int(x), int(y)+y1), int(r), (0, 255, 0), 2)
+        if 0.5 < circularity < 1.2 and min_r < r < max_r:
+            roi, roi_vals = circular_roi(gray, int(x+x_bound), int(y+y1), int(r), return_vals=True)
+            otsu_thresh, roi_thresh = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            mask = np.zeros_like(roi, dtype=np.uint8)
+            cv2.circle(mask, (roi.shape[1]//2, roi.shape[0]//2), int(r*0.8), 255, -1)
+            roi_gray = roi[mask == 255]
+            black_ratio = np.sum(roi_gray < otsu_thresh) / roi_gray.size
+            if black_ratio > black_thr:
+                bubbles.append((int(x+x_bound), int(y+y1), int(r)))
+                # cv2.circle(debug_crop, (int(x), int(y)), int(r), (0, 255, 0), 2)
 
     circles = cv2.HoughCircles(gray_blur, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=80, param2=40, minRadius=min_r, maxRadius=max_r)
     if circles is not None:
         circles = np.round(circles[0, :]).astype("int")
         for (x,y,r) in circles:
-            bubbles.append((x, y+y1, r))
-            # cv2.circle(image, (x, y+y1), r, (0, 255, 0), 2)
+            bubbles.append((int(x+x_bound), int(y+y1), int(r)))
+            # cv2.circle(debug_crop, (int(x), int(y)), int(r), (0, 255, 0), 2)
+
+    # cv2.imshow("row cropped", debug_crop)
+    # cv2.waitKey(0)
 
     bubbles = dedup_bubbles(bubbles)
     bubbles = sorted(bubbles, key=lambda b: b[0])
-    print(f"Found {len(bubbles)} bubbles on row at y={y_center}")
-    print(f"Bubbles: {bubbles}")
+    # print("FBOR: ", len(bubbles))
 
     return bubbles
 
 
-def find_columns_xs_grouped(image, y_coords, start_index, row_count, group_size, start=None, end=None):
+def find_columns_xs_grouped(image, y_coords, start_index, row_count, group_size, x_bound, start=None, end=None):
     xs = []
     radii = []
-    count = 1
     for i in range(start_index, start_index+row_count):
-        print("----------------------------------")
-        print(count)
-        bubbles = find_bubbles_on_row(image, y_coords[i])
+        bubbles = find_bubbles_on_row(image, y_coords[i], x_bound)
         for (x,y,r) in bubbles:
             xs.append(x)
             radii.append(r)
             # cv2.circle(image, (x,y), r, (0, 0, 255), 2)
-        count+=1
     
     if not xs:
         print(f"No bubbles found in rows {start_index} to {start_index+row_count-1}.")
@@ -290,6 +250,8 @@ def find_columns_xs_grouped(image, y_coords, start_index, row_count, group_size,
 
 
 def group_bubbles(coords, threshold):
+    if not coords:
+        return []
     coords = sorted(coords)
     grouped = []
     current_group = [coords[0]]
@@ -318,16 +280,15 @@ def crop_column_region(image, columns, avg_r, padding_factor=2.0):
 def check_answers(image, gray, columns, y_coords, avg_r, fill_thr=0.3):
     correct = []
     wrong = []
-    count = 1
     for index, column in enumerate(columns):
         question_count = SUBJECTS[index]["question_count"]
         answer_key = SUBJECTS[index]["answer_key"]
         cropped_column, offset = crop_column_region(image, column, avg_r)
-
         for i in range(question_count):
             row_index = first_question_index + i
-            bubbles = find_bubbles_on_row(cropped_column, y_coords[row_index])
+            bubbles = find_bubbles_on_row(cropped_column, y_coords[row_index], 0)
             bubbles = [(int(x+offset), int(y), int(r)) for (x,y,r) in bubbles]
+            # print("CA: ", len(bubbles))
             correct_answer_index = row_index - first_question_index
 
             if not bubbles:
@@ -336,31 +297,38 @@ def check_answers(image, gray, columns, y_coords, avg_r, fill_thr=0.3):
 
             # print(f"Checking question {i+1}")
             marked = []
-            print("-------------------------------")
-            print("Count: ", count)
-            print("Length bubbles: ", len(bubbles), " Bubbles found: ", bubbles)
+            strong = []
+
             for i, (x,y,r) in enumerate(bubbles):
                 roi, roi_vals = circular_roi(gray, x, y, r, return_vals=True)
                 fill_ratio = 1 - (np.mean(roi_vals) / 255.0)
                 if fill_ratio > fill_thr:
+                    if fill_ratio > 0.5:
+                        strong.append(i)
                     marked.append(i)
-            count+=1
 
             if len(marked) == 0:
                 continue # No bubbles marked
-            elif len(marked) > 1:
-                for j in marked:
-                    (x, y, r) = bubbles[j]
-                    cv2.circle(image, (x, y), r, (0, 255, 255), 2)
             else:
-                if marked[0] == answer_key[correct_answer_index]:
+                if len(marked) > 1:
+                    if len(strong) > 1:
+                        for j in strong:
+                            (x, y, r) = bubbles[j]
+                            cv2.circle(image, (x, y), r, (0, 255, 255), 2)
+                        continue   
+                if len(strong) > 0:
+                    chosen = strong
+                else:
+                    chosen = marked
+                if chosen[0] == answer_key[correct_answer_index]:
                     correct.append((index, correct_answer_index+1))
                     SUBJECTS[index]["correct"] += 1
-                    cv2.circle(image, (bubbles[marked[0]][0],bubbles[marked[0]][1]), bubbles[marked[0]][2], (0, 255, 0), 2)
+                    cv2.circle(image, (bubbles[chosen[0]][0],bubbles[chosen[0]][1]), bubbles[chosen[0]][2], (0, 255, 0), 2)
                 else:
                     SUBJECTS[index]["wrong"] += 1
                     wrong.append((index, correct_answer_index+1))
-                    cv2.circle(image, (bubbles[marked[0]][0],bubbles[marked[0]][1]), bubbles[marked[0]][2], (0, 0, 255), 2)
+                    cv2.circle(image, (bubbles[chosen[0]][0],bubbles[chosen[0]][1]), bubbles[chosen[0]][2], (0, 0, 255), 2)
+
     return image, correct, wrong
 
 
@@ -415,32 +383,37 @@ def main():
     ap.add_argument("-i", "--image", required=True, help="path to the input image")
     args = vars(ap.parse_args())
     image = cv2.imread(args["image"])
-    
+
     # image = cv2.imread(image_path)   
     
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     image, corner_pts = perspective_transform(image)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    y_coords = find_alignment_bar_y_coords(gray, corner_pts[0][0]-25) # 25 is the padding to avoid the alignment bar. should be dynamic.
-    answer_columns, avg_r = find_columns_xs_grouped(image, y_coords, first_question_index, answer_columns_row_count, bubble_count_per_question, None, None)
-    image, correct, wrong = check_answers(image, gray, answer_columns, y_coords, avg_r)    
-    # id_columns, avg_r = find_columns_xs_grouped(image, y_coords, first_id_index, id_row_count, 1, None, 10)
-    # image, id = check_column_based_marks(image, gray, id_columns, y_coords, ID_LETTER, first_id_index, id_row_count, id_length, avg_r)
-    # book_type_columns, avg_r = find_columns_xs_grouped(image, y_coords, book_type_index, 1, 1, None, None)
-    # image, book_type = check_column_based_marks(image, gray, book_type_columns, y_coords, BOOK_TYPE, book_type_index, 1, 1, avg_r)
 
+    x_bound = corner_pts[0][0]
+
+    y_coords = find_alignment_bar_y_coords(gray, corner_pts[0][0]-25) # 25 is the padding to avoid the alignment bar. should be dynamic.
+    answer_columns, avg_r = find_columns_xs_grouped(image, y_coords, first_question_index, answer_columns_row_count, bubble_count_per_question, x_bound, None, None)
+    image, correct, wrong = check_answers(image, gray, answer_columns, y_coords, avg_r)    
+    id_columns, avg_r = find_columns_xs_grouped(image, y_coords, first_id_index, id_row_count, 1, 0, None, 10)
+    image, id = check_column_based_marks(image, gray, id_columns, y_coords, ID_LETTER, first_id_index, id_row_count, id_length, avg_r)
+    book_type_columns, avg_r = find_columns_xs_grouped(image, y_coords, book_type_index, 1, 1, 0, None, None)
+    image, book_type = check_column_based_marks(image, gray, book_type_columns, y_coords, BOOK_TYPE, book_type_index, 1, 1, avg_r)
+
+    print("ID: ", id)
+    print("Book Type: ", book_type)
+    
     # with open(output_txt_path, "a", encoding="utf-8") as f:
-        # f.write("----------------------------------\n")
-        # f.write(f"{os.path.basename(image_path)}\n")
-        # f.write(f"Correct answer count of {SUBJECTS[0]["name"]}: {SUBJECTS[0]["correct"]}\n")
-        # f.write(f"Wrong answer count of {SUBJECTS[0]["name"]}: {SUBJECTS[0]["wrong"]}\n")
-        # corrects = [b for a, b in correct if a == 0]
-        # f.write(f"Corrects : {corrects}\n")
-        # wrongs = [b for a, b in wrong if a == 0]
-        # f.write(f"Wrongs : {wrongs}\n")
-        # f.write("ID: " + id + "\n")
-        # f.write("Book type: " + book_type + "\n")
+    #     f.write("----------------------------------\n")
+    #     f.write(f"{os.path.basename(image_path)}\n")
+    #     f.write(f"Correct answer count of {SUBJECTS[0]["name"]}: {SUBJECTS[0]["correct"]}\n")
+    #     f.write(f"Wrong answer count of {SUBJECTS[0]["name"]}: {SUBJECTS[0]["wrong"]}\n")
+    #     corrects = [b for a, b in correct if a == 0]
+    #     f.write(f"Corrects : {corrects}\n")
+    #     wrongs = [b for a, b in wrong if a == 0]
+    #     f.write(f"Wrongs : {wrongs}\n")
+    #     f.write("ID: " + id + "\n")
+    #     f.write("Book type: " + book_type + "\n")
 
     for i in range(len(SUBJECTS)):
         SUBJECTS[i]["correct"] = 0
@@ -454,7 +427,7 @@ def main():
 
 if __name__ == "__main__":
     answer_columns_row_count = 40
-    bubble_threshold = 170
+    bubble_threshold = 150
     first_question_index = 17
     bubble_count_per_question = 5
     first_id_index = 4
@@ -484,7 +457,7 @@ if __name__ == "__main__":
 
     # for filename in sorted(image_files):
     #     image_path = os.path.join(image_folder, filename)
-    #     print(f"{filename} processing...")
+    #     print(f"{filename}")
 
     #     main(image_path, output_txt)
 
