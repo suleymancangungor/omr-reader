@@ -820,7 +820,7 @@ if __name__ == "__main__":
 
     # main()
 
-    image_folder = ""
+    image_folder = "/home/can/Desktop/omr/images/3849200"
     output_txt = "results.txt"
 
     supported_formats = (".jpg",".jpeg",".png")
