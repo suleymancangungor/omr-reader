@@ -32,7 +32,7 @@ You can run the OMR system in two different ways:
 
 To process a single image, use the `--image` flag in your terminal:
 
-python main.py --image path/to/input.jpg
+`python main.py --image path/to/input.jpg`
 
 This will process only the specified image and display the results.
 
@@ -66,7 +66,7 @@ The project requires **Python 3.8+** and the following libraries:
 
 You can install all dependencies by running the following command:
 
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 ---
 
