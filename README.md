@@ -56,6 +56,10 @@ This will automatically process all images in the specified folder.
 
 ---
 
+![OMR Example Output](images/example_output.png)
+
+---
+
 ## Requirements
 
 The project requires **Python 3.8+** and the following libraries:
