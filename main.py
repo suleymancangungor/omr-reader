@@ -820,7 +820,7 @@ if __name__ == "__main__":
 
     # main()
 
-    image_folder = "/home/can/Desktop/me/omr/images/grayscale_output"
+    image_folder = ""
     output_txt = "results.txt"
 
     supported_formats = (".jpg",".jpeg",".png")
